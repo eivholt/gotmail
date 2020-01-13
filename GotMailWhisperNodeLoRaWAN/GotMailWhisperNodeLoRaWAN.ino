@@ -1,38 +1,25 @@
+#define DEBUG
 #include <T2WhisperNode.h>
 #include <LowPower.h>
 #include <lmic.h>
 #include <hal/hal.h>
-//#include <SPI.h>
-//#include <RH_RF95.h>
-
-#define DEBUG
+#include <SPI.h>
+#include <RH_RF95.h>
+#include "secrets.h"
 
 const int nssPin = 10;
 const int rstPin = 7;
 const int dioPin = 2;
 
 const int wakeUpPin = 3;
-//#define RADIO_TX_POWER 5
+#define RADIO_TX_POWER 5
 
-// RH_RF95 myRadio;
-// T2Flash myFlash;
+RH_RF95 myRadio;
+T2Flash myFlash;
 
-// This EUI must be in little-endian format, so least-significant-byte
-// first. When copying an EUI from ttnctl output, this means to reverse
-// the bytes. For TTN issued EUIs the last bytes should be 0xD5, 0xB3,
-// 0x70.
-static const u1_t PROGMEM APPEUI[8]={ 0x82, 0x99, 0x00, 0xD0, 0x7E, 0xD5, 0xB3, 0x70 };
+// Keys are defined in secrets.h
 void os_getArtEui (u1_t* buf) { memcpy_P(buf, APPEUI, 8);}
-
-// This should also be in little endian format, see above.
-static const u1_t PROGMEM DEVEUI[8]={ 0x01, 0x4B, 0xFB, 0x7C, 0xBA, 0xA6, 0xA3, 0x00 };
 void os_getDevEui (u1_t* buf) { memcpy_P(buf, DEVEUI, 8);}
-
-// This key should be in big endian format (or, since it is not really a
-// number but a block of memory, endianness does not really apply). In
-// practice, a key taken from ttnctl can be copied as-is.
-// The key shown here is the semtech default key.
-static const u1_t PROGMEM APPKEY[16] = { 0x92, 0x39, 0x05, 0xD2, 0xD4, 0xBE, 0x1D, 0x6D, 0x8D, 0x1E, 0xEE, 0x5A, 0x1C, 0x65, 0x9C, 0x48 };
 void os_getDevKey (u1_t* buf) {  memcpy_P(buf, APPKEY, 16);}
 
 static byte mydata[2]; 
@@ -73,7 +60,7 @@ void do_send(osjob_t* j){
         Serial.println((int)voltage);
         #endif
 
-        //myRadio.setTxPower(RADIO_TX_POWER);
+        myRadio.setTxPower(RADIO_TX_POWER);
         LMIC_setTxData2(1, mydata, sizeof(mydata), 0);
     }
     // Next TX is scheduled after TX_COMPLETE event.
@@ -81,7 +68,7 @@ void do_send(osjob_t* j){
 
 void setup() {
   delay(1000);
-  pinMode(wakeUpPin, INPUT);
+  pinMode(wakeUpPin, INPUT_PULLUP);
   #ifdef DEBUG
   Serial.begin(115200);
   Serial.println("setup");
@@ -89,7 +76,6 @@ void setup() {
   #endif
   
   DisableNonEssentials();
-  //while (!Serial); // only needed on feathers
   
   os_init();
   // Reset the MAC state. Session and pending data transfers will be discarded.
@@ -107,16 +93,27 @@ void loop()
   os_runloop_once();
 }
 
+// Put device to sleep until interrupt
 void PowerDown()
 {
   #ifdef DEBUG
   Serial.println("PowerDown");
   Serial.flush();
   #endif
-  //digitalWrite(T2_WPN_LED_2, HIGH);
-  //myRadio.sleep();  
-  attachInterrupt(digitalPinToInterrupt(wakeUpPin), wakeUp, HIGH);
+  myRadio.sleep();  
+  attachInterrupt(digitalPinToInterrupt(wakeUpPin), wakeUp, FALLING);
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+}
+
+// Put device to sleep for a while to avoid multiple transmissions per usage of mail box
+void GraceSleep()
+{
+  #ifdef DEBUG
+  Serial.println("GraceSleep");
+  Serial.flush();
+  #endif
+  myRadio.sleep();  
+  LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
 }
 
 void PowerUp()
@@ -126,69 +123,36 @@ void PowerUp()
   Serial.println("PowerUp");
   Serial.flush();
   #endif
-  //digitalWrite(T2_WPN_LED_2, LOW);
 }
 
 void DisableNonEssentials()
 {
-  // Setup the Blue LED pin
-  digitalWrite(T2_WPN_LED_1, LOW);
-  pinMode(T2_WPN_LED_1, OUTPUT);   // Set LED pint to OUTPUT
-  
-  // Setup the Yellow LED pin
-  digitalWrite(T2_WPN_LED_2, LOW);
-  pinMode(T2_WPN_LED_2, OUTPUT);   // Set LED pint to OUTPUT
-  
-  //myFlash.init(T2_WPN_FLASH_SPI_CS);
-  //myFlash.powerDown();
+  myFlash.init(T2_WPN_FLASH_SPI_CS);
+  myFlash.powerDown();
 }
 
 void onEvent (ev_t ev) {
-//    Serial.print(os_getTime());
-//    Serial.print(": ");
+   #ifdef DEBUG
+   Serial.print(os_getTime());
+   Serial.print(": ");
+   #endif
     switch(ev) {
-//        case EV_SCAN_TIMEOUT:
-//            Serial.println(F("EV_SCAN_TIMEOUT"));
-//            break;
-//        case EV_BEACON_FOUND:
-//            Serial.println(F("EV_BEACON_FOUND"));
-//            break;
-//        case EV_BEACON_MISSED:
-//            Serial.println(F("EV_BEACON_MISSED"));
-//            break;
-//        case EV_BEACON_TRACKED:
-//            Serial.println(F("EV_BEACON_TRACKED"));
-//            break;
-//        case EV_JOINING:
-//            Serial.println(F("EV_JOINING"));
-//            break;
-        case EV_JOINED:
-            //Serial.println(F("EV_JOINED"));
-            //digitalWrite(T2_WPN_LED_2, LOW);
-            // Ignore the channels from the Join Accept
-            // Disable link check validation (automatically enabled
-            // during join, but not supported by TTN at this time).
-            LMIC_setLinkCheckMode(0);
-            #ifdef DEBUG
-            Serial.println("EV_JOINED");
-            Serial.flush();
-            #endif
-            break;
-//        case EV_RFU1:
-//            Serial.println(F("EV_RFU1"));
-//            break;
-//        case EV_JOIN_FAILED:
-//            Serial.println(F("EV_JOIN_FAILED"));
-//            break;
-//        case EV_REJOIN_FAILED:
-//            Serial.println(F("EV_REJOIN_FAILED"));
-//            break;
-        case EV_TXCOMPLETE:
-            #ifdef DEBUG
-            Serial.println("EV_TXCOMPLETE");
-            Serial.flush();
-            #endif
-            //Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
+      case EV_JOINED:
+          // Ignore the channels from the Join Accept
+          // Disable link check validation (automatically enabled
+          // during join, but not supported by TTN at this time).
+          LMIC_setLinkCheckMode(0);
+          #ifdef DEBUG
+          Serial.println("EV_JOINED");
+          Serial.flush();
+          #endif
+          break;
+      case EV_TXCOMPLETE:
+          #ifdef DEBUG
+          Serial.println("EV_TXCOMPLETE");
+          Serial.flush();
+          #endif
+          //Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
 //            if (LMIC.txrxFlags & TXRX_ACK)
 //              Serial.println(F("Received ack"));
 //            if (LMIC.dataLen) {
@@ -196,33 +160,59 @@ void onEvent (ev_t ev) {
 //              Serial.println(LMIC.dataLen);
 //              Serial.println(F(" bytes of payload"));
 //            }
-            PowerDown();
-            PowerUp();
-            os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
-            break;
-//        case EV_LOST_TSYNC:
-//            Serial.println(F("EV_LOST_TSYNC"));
-//            break;
-//        case EV_RESET:
-//            Serial.println(F("EV_RESET"));
-//            break;
-//        case EV_RXCOMPLETE:
-//            // data received in ping slot
-//            Serial.println(F("EV_RXCOMPLETE"));
-//            break;
-//        case EV_LINK_DEAD:
-//            Serial.println(F("EV_LINK_DEAD"));
-//            break;
-//        case EV_LINK_ALIVE:
-//            Serial.println(F("EV_LINK_ALIVE"));
-//            break;
-         default:
-            //Serial.println(F("Unknown event"));
-            #ifdef DEBUG
-            Serial.println("Unknown event");
-            Serial.flush();
-            #endif
-            break;
+          GraceSleep();
+          PowerDown();
+          PowerUp();
+          os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
+          break;
+      #ifdef DEBUG
+      case EV_SCAN_TIMEOUT:
+          Serial.println(F("EV_SCAN_TIMEOUT"));
+          break;
+      case EV_BEACON_FOUND:
+          Serial.println(F("EV_BEACON_FOUND"));
+          break;
+      case EV_BEACON_MISSED:
+          Serial.println(F("EV_BEACON_MISSED"));
+          break;
+      case EV_BEACON_TRACKED:
+          Serial.println(F("EV_BEACON_TRACKED"));
+          break;
+      case EV_JOINING:
+          Serial.println(F("EV_JOINING"));
+          break;
+      case EV_RFU1:
+          Serial.println(F("EV_RFU1"));
+          break;
+      case EV_JOIN_FAILED:
+          Serial.println(F("EV_JOIN_FAILED"));
+          break;
+      case EV_REJOIN_FAILED:
+          Serial.println(F("EV_REJOIN_FAILED"));
+          break;
+      case EV_LOST_TSYNC:
+           Serial.println(F("EV_LOST_TSYNC"));
+          break;
+      case EV_RESET:
+          Serial.println(F("EV_RESET"));
+          break;
+      case EV_RXCOMPLETE:
+          // data received in ping slot
+          Serial.println(F("EV_RXCOMPLETE"));
+          break;
+      case EV_LINK_DEAD:
+          Serial.println(F("EV_LINK_DEAD"));
+          break;
+      case EV_LINK_ALIVE:
+          Serial.println(F("EV_LINK_ALIVE"));
+          break;
+      #endif
+      default:
+          #ifdef DEBUG
+          Serial.println("Unknown event");
+          Serial.flush();
+          #endif
+          break;
     }
 }
 
