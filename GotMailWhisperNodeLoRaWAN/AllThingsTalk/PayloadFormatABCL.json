@@ -1,0 +1,17 @@
+{
+    "name": "mailboxsensor",
+    "comment": "Sent when lid opens, with battery voltage.",
+    "version": "1.0.0",
+    "sense": [
+      {
+        "asset": "Voltage",
+        "value": {
+          "byte": 0,
+          "bytelength": 2,
+          "type": "integer",
+          "signed": false
+        },
+        "comment": "Voltage value as millivolts."
+      }
+    ]
+  }
